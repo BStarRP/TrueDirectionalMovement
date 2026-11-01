@@ -19,7 +19,8 @@
 		V2,
 		V3,
 		V4,
-		V5
+		V5,
+		V6
 	};
 
 	// Error types that may be returned by the True Directional Movement API
@@ -215,6 +216,27 @@
 		virtual PluginHandle GetDisableTargetLockOwner() const noexcept = 0;
 	};
 
+	class IVTDM6 : public IVTDM5
+	{
+	public:
+		/// <summary>
+		/// Force TDM's natural target lock onto this actor and hold it.
+		/// Manual unlock, LOS/distance drop, and switch-target are ignored until ClearForcedTarget.
+		/// Dead or unloaded targets still drop.
+		/// </summary>
+		virtual bool SetForcedTarget(ActorHandle a_target) noexcept = 0;
+
+		/// <summary>
+		/// Release a forced lock and turn target lock off.
+		/// </summary>
+		virtual void ClearForcedTarget() noexcept = 0;
+
+		/// <summary>
+		/// True while a forced lock is holding.
+		/// </summary>
+		[[nodiscard]] virtual bool IsForcedTarget() const noexcept = 0;
+	};
+
 	typedef void* (*_RequestPluginAPI)(const InterfaceVersion interfaceVersion);
 
 	/// <summary>
@@ -223,7 +245,7 @@
 	/// </summary>
 	/// <param name="a_interfaceVersion">The interface version to request</param>
 	/// <returns>The pointer to the API singleton, or nullptr if request failed</returns>
-	[[nodiscard]] inline void* RequestPluginAPI(const InterfaceVersion a_interfaceVersion = InterfaceVersion::V5)
+	[[nodiscard]] inline void* RequestPluginAPI(const InterfaceVersion a_interfaceVersion = InterfaceVersion::V6)
 	{
 		auto pluginHandle = GetModuleHandle("TrueDirectionalMovement.dll");
 		_RequestPluginAPI requestAPIFunction = (_RequestPluginAPI)GetProcAddress(pluginHandle, "RequestPluginAPI");

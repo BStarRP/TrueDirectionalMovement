@@ -127,8 +127,8 @@ struct Settings
 	static inline float fTargetLockDistanceMultiplierSmall = 1.f;
 	static inline float fTargetLockDistanceMultiplierLarge = 2.f;
 	static inline float fTargetLockDistanceMultiplierExtraLarge = 4.f;
-	static inline float fTargetLockPitchAdjustSpeed = 2.f;
-	static inline float fTargetLockYawAdjustSpeed = 8.f;
+	static inline float fTargetLockPitchAdjustSpeed = 5.f;
+	static inline float fTargetLockYawAdjustSpeed = 12.f;
 	static inline float fTargetLockPitchOffsetStrength = 0.25f;
 	static inline TargetLockProjectileAimType uTargetLockArrowAimType = TargetLockProjectileAimType::kPredict;
 	static inline TargetLockProjectileAimType uTargetLockMissileAimType = TargetLockProjectileAimType::kPredict;

@@ -40,6 +40,7 @@ namespace Scaleform
 
 		virtual void SetWidgetState(WidgetState a_widgetState);
 		virtual void ChangeTarget(RE::ObjectRefHandle a_refHandle, RE::NiPointer<RE::NiAVObject> a_targetPoint);
+		void SetPoint(RE::NiPointer<RE::NiAVObject> a_targetPoint);
 
 		RE::ObjectRefHandle _refHandle;
 		RE::NiPointer<RE::NiAVObject> _targetPoint;
@@ -62,5 +63,6 @@ namespace Scaleform
 		InterpMode _interpMode = kNone;
 
 		static constexpr float _fullInterpDuration = 0.5f;
+		static constexpr float _pointInterpDuration = 0.28f;
 	};
 }

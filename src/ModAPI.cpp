@@ -275,3 +275,26 @@ bool Messaging::TDMInterface::IsYawControlTaken() const noexcept
 {
 	return yawOwner.load(std::memory_order::memory_order_acquire) != SKSE::kInvalidPluginHandle;
 }
+
+bool Messaging::TDMInterface::SetForcedTarget(RE::ActorHandle a_target) noexcept
+{
+	auto directionalMovementHandler = DirectionalMovementHandler::GetSingleton();
+	if (!directionalMovementHandler) {
+		return false;
+	}
+	return directionalMovementHandler->SetForcedTarget(a_target);
+}
+
+void Messaging::TDMInterface::ClearForcedTarget() noexcept
+{
+	auto directionalMovementHandler = DirectionalMovementHandler::GetSingleton();
+	if (directionalMovementHandler) {
+		directionalMovementHandler->ClearForcedTarget();
+	}
+}
+
+bool Messaging::TDMInterface::IsForcedTarget() const noexcept
+{
+	auto directionalMovementHandler = DirectionalMovementHandler::GetSingleton();
+	return directionalMovementHandler && directionalMovementHandler->IsForcedTarget();
+}

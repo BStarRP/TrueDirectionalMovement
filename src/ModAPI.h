@@ -11,8 +11,9 @@ namespace Messaging
 	using InterfaceVersion3 = ::TDM_API::IVTDM3;
 	using InterfaceVersion4 = ::TDM_API::IVTDM4;
 	using InterfaceVersion5 = ::TDM_API::IVTDM5;
+	using InterfaceVersion6 = ::TDM_API::IVTDM6;
 
-	class TDMInterface : public InterfaceVersion5
+	class TDMInterface : public InterfaceVersion6
 	{
 	private:
 		TDMInterface() noexcept;
@@ -53,6 +54,11 @@ namespace Messaging
 		virtual APIResult RequestDisableTargetLock(SKSE::PluginHandle a_modHandle) noexcept override;
 		virtual SKSE::PluginHandle GetDisableTargetLockOwner() const noexcept override;
 		virtual APIResult ReleaseDisableTargetLock(SKSE::PluginHandle a_modHandle) noexcept override;
+
+		// InterfaceVersion6
+		virtual bool SetForcedTarget(RE::ActorHandle a_target) noexcept override;
+		virtual void ClearForcedTarget() noexcept override;
+		virtual bool IsForcedTarget() const noexcept override;
 
 		// Internal
 		// Mark directional movement control as required by True Directional Movement for API requests

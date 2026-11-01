@@ -210,6 +210,7 @@ void DirectionalMovementHandler::Update()
 	Settings::UpdateGlobals();
 
 	ProgressTimers();
+	TickLockLook();
 
 	UpdateTargetLock();
 
@@ -1110,7 +1111,7 @@ void DirectionalMovementHandler::SetDesiredAngleToTarget(RE::PlayerCharacter* a_
 	RE::NiPoint2 playerPos;
 	playerPos.x = a_playerCharacter->GetPositionX();
 	playerPos.y = a_playerCharacter->GetPositionY();
-	RE::NiPoint3 targetPos = _currentTargetPoint ? _currentTargetPoint->world.translate : target->GetLookingAtLocation();
+	RE::NiPoint3 targetPos = GetTargetPosition();
 
 	RE::NiPoint2 directionToTarget = RE::NiPoint2(-(targetPos.x - playerPos.x), targetPos.y - playerPos.y);
 	directionToTarget.Unitize();
@@ -1289,7 +1290,7 @@ void DirectionalMovementHandler::UpdateRotationLockedCam()
 		return;
 	}
 
-	RE::NiPoint3 targetPos = _currentTargetPoint ? _currentTargetPoint->world.translate : _target.get()->GetLookingAtLocation();
+	RE::NiPoint3 targetPos = GetTargetPosition();
 
 	auto playerCharacter = RE::PlayerCharacter::GetSingleton();
 	if (!playerCharacter) {
@@ -1467,6 +1468,9 @@ bool DirectionalMovementHandler::ToggleTargetLock(bool bEnable, bool bPressedMan
 	ResetLockBehindTarget();
 
 	auto playerCharacter = RE::PlayerCharacter::GetSingleton();
+	if (!bEnable && _bForcedTarget) {
+		return false;
+	}
 	if (bEnable)
 	{
 		if (RE::MenuTopicManager::GetSingleton()->speaker) // don't enter lockon during dialogue
@@ -1489,17 +1493,7 @@ bool DirectionalMovementHandler::ToggleTargetLock(bool bEnable, bool bPressedMan
 
 		if (actor) 
 		{
-			SetTarget(actor);
-
-			// Set graph variable
-			playerCharacter->SetGraphVariableBool(GraphVarNames::TDM_TargetLock, true);
-
-			// Add spell so DAR can detect target lock
-			if (Settings::spel_targetLockSpell) {
-				playerCharacter->AddSpell(Settings::spel_targetLockSpell);
-			}
-
-			return true;
+			return ApplyLock(actor);
 		}
 
 		// if we're here, this means toggle target lock was called and there was no valid target to be found, so reset camera if we should and fall through to disable a target lock if it's enabled
@@ -1550,6 +1544,41 @@ bool DirectionalMovementHandler::ToggleTargetLock(bool bEnable, bool bPressedMan
 	return false;
 }
 
+bool DirectionalMovementHandler::ApplyLock(RE::ActorHandle a_target)
+{
+	auto playerCharacter = RE::PlayerCharacter::GetSingleton();
+	if (!a_target || !playerCharacter) {
+		return false;
+	}
+
+	SetTarget(a_target);
+	_lastLOSTimer = _lostSightAllowedDuration;
+	playerCharacter->SetGraphVariableBool(GraphVarNames::TDM_TargetLock, true);
+	if (Settings::spel_targetLockSpell) {
+		playerCharacter->AddSpell(Settings::spel_targetLockSpell);
+	}
+	return true;
+}
+
+bool DirectionalMovementHandler::SetForcedTarget(RE::ActorHandle a_target)
+{
+	if (!a_target || !a_target.get()) {
+		return false;
+	}
+	auto playerCharacter = RE::PlayerCharacter::GetSingleton();
+	if (!playerCharacter || RE::MenuTopicManager::GetSingleton()->speaker) {
+		return false;
+	}
+	_bForcedTarget = true;
+	return ApplyLock(a_target);
+}
+
+void DirectionalMovementHandler::ClearForcedTarget()
+{
+	_bForcedTarget = false;
+	ToggleTargetLock(false);
+}
+
 RE::ActorHandle DirectionalMovementHandler::GetTarget() const
 {
 	//return HasTargetLocked() ? _target : _softTarget;
@@ -1563,9 +1592,13 @@ RE::NiPointer<RE::NiAVObject> DirectionalMovementHandler::GetTargetPoint() const
 
 RE::NiPoint3 DirectionalMovementHandler::GetTargetPosition() const
 {
+	if (_lockAimValid) {
+		return _lockAim;
+	}
 	if (_currentTargetPoint) {
 		return _currentTargetPoint->world.translate;
-	} else if (_target) {
+	}
+	if (_target) {
 		return _target.get()->GetLookingAtLocation();
 	}
 
@@ -1576,7 +1609,7 @@ void DirectionalMovementHandler::ClearTargets()
 {
 	if (_target)
 	{
-		ToggleTargetLock(false);
+		ClearForcedTarget();
 	}
 	if (_softTarget)
 	{
@@ -1637,8 +1670,7 @@ bool DirectionalMovementHandler::CheckCurrentTarget(RE::ActorHandle a_target, bo
 		target->IsDead() ||
 		(actorState->IsBleedingOut() && target->IsEssential()) ||
 		target->GetPosition().GetDistance(playerCharacter->GetPosition()) > (Settings::fTargetLockDistance * GetTargetLockDistanceRaceSizeMultiplier(target->GetRace()) * _targetLockDistanceHysteresis) ||
-		target->AsActorValueOwner()->GetActorValue(RE::ActorValue::kInvisibility) > 0 ||
-		//RE::UI::GetSingleton()->IsMenuOpen("Dialogue Menu"))
+		IsActorConcealed(target.get()) ||
 		RE::MenuTopicManager::GetSingleton()->speaker)
 	{
 		return false;
@@ -1650,24 +1682,16 @@ bool DirectionalMovementHandler::CheckCurrentTarget(RE::ActorHandle a_target, bo
 
 	if (Settings::bTargetLockTestLOS)
 	{
-		if (bInstantLOS)
-		{
-			bool r8 = false;
-			bool bHasLOS = playerCharacter->HasLineOfSight(a_target.get().get(), r8);
+		bool r8 = false;
+		bool bHasLOS = playerCharacter->HasLineOfSight(a_target.get().get(), r8);
+		if (bInstantLOS) {
 			if (!bHasLOS) {
 				return false;
 			}
-		}
-		else 
-		{
-			auto timeNow = std::chrono::system_clock::now();
-
-			bool r8 = false;
-			bool bHasLOS = playerCharacter->HasLineOfSight(a_target.get().get(), r8);
+		} else {
 			if (bHasLOS) {
 				_lastLOSTimer = _lostSightAllowedDuration;
 			}
-
 			if (_lastLOSTimer <= 0.f) {
 				return false;
 			}
@@ -1680,7 +1704,15 @@ bool DirectionalMovementHandler::CheckCurrentTarget(RE::ActorHandle a_target, bo
 void DirectionalMovementHandler::UpdateTargetLock()
 {
 	if (HasTargetLocked())
-	{		
+	{
+		if (_bForcedTarget) {
+			auto target = _target.get();
+			if (!target || target->IsDisabled() || target->IsDead()) {
+				ClearForcedTarget();
+			}
+			return;
+		}
+
 		auto playerCamera = RE::PlayerCamera::GetSingleton();
 		if (playerCamera && playerCamera->currentState->id == RE::CameraStates::kVATS)
 		{
@@ -1721,7 +1753,7 @@ bool DirectionalMovementHandler::IsActorValidTarget(RE::ActorPtr a_actor, bool a
 	if (a_bCheckDistance && a_actor->GetPosition().GetDistance(playerCharacter->GetPosition()) > Settings::fTargetLockDistance * GetTargetLockDistanceRaceSizeMultiplier(a_actor->GetRace()))
 		return false;
 
-	if (a_actor->AsActorValueOwner()->GetActorValue(RE::ActorValue::kInvisibility) > 0)
+	if (IsActorConcealed(a_actor.get()))
 		return false;
 
 	/*if (a_actor->IsPlayerTeammate())
@@ -1837,125 +1869,190 @@ RE::ActorHandle DirectionalMovementHandler::FindTarget(TargetLockSelectionMode a
 
 void DirectionalMovementHandler::SwitchTarget(Direction a_direction)
 {
+	if (_bForcedTarget) {
+		return;
+	}
 	if (a_direction == _lastTargetSwitchDirection && _lastTargetSwitchTimer > 0.f) {
-		return;  // too soon
+		return;
 	}
 
-	//RE::ActorHandle actor = GetClosestTarget(FindTargetsByDirection(a_direction), _target);
-
-	if (SwitchTargetPoint(a_direction)) {
-		if (APIs::TrueHUD) {
-			APIs::TrueHUD->SetTarget(SKSE::GetPluginHandle(), _target);
-
-			if (Settings::bEnableTargetLockReticle) {
-				if (_target) {
-					if (auto widget = _targetLockReticle.lock()) {
-						widget->ChangeTarget(_target, _currentTargetPoint);
-					} else {
-						AddTargetLockReticle(_target, _currentTargetPoint);
-					}
-				} else {
-					RemoveTargetLockReticle();
+	RE::ActorHandle actor = SwitchScreenTarget(a_direction);
+	if (actor) {
+		SetTarget(actor);
+		if (auto chest = GetBestTargetPoint(actor)) {
+			SetTargetPoint(chest);
+			if (APIs::TrueHUD && Settings::bEnableTargetLockReticle) {
+				if (auto widget = _targetLockReticle.lock()) {
+					widget->ChangeTarget(actor, chest);
 				}
 			}
 		}
-
 		_lastTargetSwitchDirection = a_direction;
 		_lastTargetSwitchTimer = 0.25f;
+	}
+}
 
-	} else {
-		RE::ActorHandle actor = SwitchScreenTarget(a_direction);
+void DirectionalMovementHandler::SetLockPoint(RE::NiPointer<RE::NiAVObject> a_point)
+{
+	if (!a_point || a_point == _currentTargetPoint) {
+		return;
+	}
 
-		if (actor) {
-			SetTarget(actor);
-			_lastTargetSwitchDirection = a_direction;
-			_lastTargetSwitchTimer = 0.25f;
+	SetTargetPoint(a_point);
+	if (APIs::TrueHUD && Settings::bEnableTargetLockReticle) {
+		if (auto widget = _targetLockReticle.lock()) {
+			widget->SetPoint(_currentTargetPoint);
+		} else {
+			AddTargetLockReticle(_target, _currentTargetPoint);
 		}
 	}
 }
 
-bool DirectionalMovementHandler::SwitchTargetPoint(Direction a_direction)
+void DirectionalMovementHandler::ApplyLockLook(float a_dx, float a_dy)
 {
 	if (!_target) {
-		return false;
+		return;
 	}
 
-	auto targetPoints = GetTargetPoints(_target);
-	if (targetPoints.empty()) {
-		return false;
+	float gain = static_cast<float>(Settings::uTargetLockMouseSensitivity);
+	if (gain < 1.f) {
+		gain = 1.f;
+	}
+	_lockLook.x += a_dx / gain;
+	_lockLook.y += -a_dy / gain;
+
+	RE::NiPoint2 dir = _lockLook;
+	if (dir.Unitize() > 1.f) {
+		_lockLook = dir;
+	}
+	_lockLookInput = true;
+}
+
+void DirectionalMovementHandler::SetLockLook(float a_x, float a_y)
+{
+	if (!_target) {
+		return;
 	}
 
-	if (!_currentTargetPoint) {
-		return false;
+	_lockLook.x = a_x;
+	_lockLook.y = a_y;
+	RE::NiPoint2 dir = _lockLook;
+	if (dir.Unitize() > 1.f) {
+		_lockLook = dir;
+	}
+	_lockLookInput = true;
+}
+
+void DirectionalMovementHandler::TickLockLook()
+{
+	if (!HasTargetLocked()) {
+		_lockLook = {};
+		_lockAimValid = false;
+		return;
 	}
 
-	RE::NiPoint3 currentTargetPos = _currentTargetPoint->world.translate;
+	auto chest = GetBestTargetPoint(_target);
+	if (!chest) {
+		_lockAimValid = false;
+		return;
+	}
 
-	float bestScreenDistance = FLT_MAX;
-	bool bChangedTargetPoint = false;
-
-	constexpr RE::NiPoint2 upVector{ 0.f, 1.f };
-	constexpr RE::NiPoint2 downVector{ 0.f, -1.f };
-	constexpr RE::NiPoint2 leftVector{ -1.f, 0.f };
-	constexpr RE::NiPoint2 rightVector{ 1.f, 0.f };
-
-	for (auto& targetPoint : targetPoints) {
-		if (!targetPoint || targetPoint == _currentTargetPoint) {
-			continue;
+	const float dt = GetRealTimeDeltaTime();
+	if (_lockLookInput) {
+		_lockLookHold = _lockLookHoldDuration;
+	} else if (_lockLookHold > 0.f) {
+		_lockLookHold -= dt;
+	} else {
+		_lockLook *= expf(-_lockLookDecay * dt);
+		if (_lockLook.x * _lockLook.x + _lockLook.y * _lockLook.y < 0.0004f) {
+			_lockLook = {};
 		}
+	}
+	_lockLookInput = false;
 
-		RE::NiPoint3 newTargetPos = targetPoint->world.translate;
+	RE::NiPointer<RE::NiAVObject> next = chest;
+	RE::NiPoint2 look = _lockLook;
+	const float mag = look.Unitize();
+	if (mag >= _lockLookDead) {
+		RE::NiPoint2 chestScreen;
+		float chestDepth;
+		RE::NiCamera::WorldPtToScreenPt3((float(*)[4])g_worldToCamMatrix, *g_viewPort, chest->world.translate, chestScreen.x, chestScreen.y, chestDepth, 1e-5f);
 
-		RE::NiPoint2 currentTargetScreenPosition;
-		float currentTargetDepth;
-		RE::NiPoint2 newTargetScreenPosition;
-		float newTargetDepth;
-		RE::NiCamera::WorldPtToScreenPt3((float(*)[4])g_worldToCamMatrix, *g_viewPort, currentTargetPos, currentTargetScreenPosition.x, currentTargetScreenPosition.y, currentTargetDepth, 1e-5f);
-		RE::NiCamera::WorldPtToScreenPt3((float(*)[4])g_worldToCamMatrix, *g_viewPort, newTargetPos, newTargetScreenPosition.x, newTargetScreenPosition.y, newTargetDepth, 1e-5f);
-
-		if (newTargetDepth < 0.f) {  // offscreen
-			continue;
-		}
-
-		bool bIsCorrectDirection = false;
-		RE::NiPoint2 directionVector;
-
-		switch (a_direction) {
-		case Direction::kLeft:
-			bIsCorrectDirection = newTargetScreenPosition.x < currentTargetScreenPosition.x;
-			directionVector = leftVector;
-			break;
-		case Direction::kRight:
-			bIsCorrectDirection = newTargetScreenPosition.x > currentTargetScreenPosition.x;
-			directionVector = rightVector;
-			break;
-		case Direction::kForward:
-		case Direction::kUp:
-			bIsCorrectDirection = newTargetScreenPosition.y > currentTargetScreenPosition.y;
-			directionVector = upVector;
-			break;
-		case Direction::kBack:
-		case Direction::kDown:
-			bIsCorrectDirection = newTargetScreenPosition.y < currentTargetScreenPosition.y;
-			directionVector = downVector;
-			break;
-		}
-
-		if (bIsCorrectDirection) {
-			RE::NiPoint2 distanceVector = newTargetScreenPosition - currentTargetScreenPosition;
-			float screenDistance = distanceVector.Unitize();
-			float directionMult = 2.f - directionVector.Dot(distanceVector);  // so targets that are closer to the desired direction are given better score than closer targets that aren't really in that direction
-
-			if (screenDistance * directionMult < bestScreenDistance) {
-				bestScreenDistance = screenDistance;
-				_currentTargetPoint = targetPoint;
-				bChangedTargetPoint = true;
+		auto points = GetTargetPoints(_target);
+		float maxAlong = 0.f;
+		for (auto& point : points) {
+			if (!point || point == chest) {
+				continue;
+			}
+			RE::NiPoint2 screen;
+			float depth;
+			RE::NiCamera::WorldPtToScreenPt3((float(*)[4])g_worldToCamMatrix, *g_viewPort, point->world.translate, screen.x, screen.y, depth, 1e-5f);
+			if (depth < 0.f) {
+				continue;
+			}
+			float along = (screen - chestScreen).Dot(look);
+			if (along > maxAlong) {
+				maxAlong = along;
 			}
 		}
 
+		const float t = (mag - _lockLookDead) / (1.f - _lockLookDead);
+		const float reach = maxAlong * t;
+
+		auto scorePoint = [&](RE::NiAVObject* point, bool requireAlong) -> float {
+			RE::NiPoint2 screen;
+			float depth;
+			RE::NiCamera::WorldPtToScreenPt3((float(*)[4])g_worldToCamMatrix, *g_viewPort, point->world.translate, screen.x, screen.y, depth, 1e-5f);
+			if (depth < 0.f) {
+				return FLT_MAX;
+			}
+			RE::NiPoint2 delta = screen - chestScreen;
+			float along = delta.Dot(look);
+			if (requireAlong && along <= 0.f) {
+				return FLT_MAX;
+			}
+			RE::NiPoint2 side = delta - look * along;
+			return side.Unitize() + fabsf(along - reach);
+		};
+
+		float best = FLT_MAX;
+		for (auto& point : points) {
+			if (!point || point == chest) {
+				continue;
+			}
+			float score = scorePoint(point.get(), true);
+			if (score < best) {
+				best = score;
+				next = point;
+			}
+		}
+
+		if (_currentTargetPoint && _currentTargetPoint != chest) {
+			float stick = scorePoint(_currentTargetPoint.get(), false);
+			if (stick <= best + _lockLookStick) {
+				next = _currentTargetPoint;
+			}
+		}
 	}
 
-	return bChangedTargetPoint;
+	SetLockPoint(next);
+
+	const RE::NiPoint3 dest = next->world.translate;
+	auto actor = _target.get();
+	const RE::NiPoint3 actorPos = actor ? actor->GetPosition() : dest;
+	if (!_lockAimValid || !actor) {
+		_lockAim = dest;
+		_lockActorPos = actorPos;
+		_lockAimValid = true;
+	} else {
+		// Ride the actor. Ease only the point on the body so bone animation does not shake the camera.
+		_lockAim += actorPos - _lockActorPos;
+		_lockActorPos = actorPos;
+		const float speed = next == chest ? _lockChestSpeed : _lockAimSpeed;
+		_lockAim.x = InterpTo(_lockAim.x, dest.x, dt, speed);
+		_lockAim.y = InterpTo(_lockAim.y, dest.y, dt, speed);
+		_lockAim.z = InterpTo(_lockAim.z, dest.z, dt, speed);
+	}
 }
 
 RE::ActorHandle DirectionalMovementHandler::SwitchScreenTarget(Direction a_direction)
@@ -2115,7 +2212,22 @@ RE::NiPointer<RE::NiAVObject> DirectionalMovementHandler::GetBestTargetPoint(RE:
 		return nullptr;
 	}
 
-	// just return the first target point on the list
+	auto race = actor->GetRace();
+	auto bodyPartData = race ? race->bodyPartData : nullptr;
+	auto torso = bodyPartData ? bodyPartData->parts[RE::BGSBodyPartDefs::LIMB_ENUM::kTorso] : nullptr;
+	if (torso) {
+		for (auto& point : targetPoints) {
+			if (point && point->name == torso->targetName) {
+				return point;
+			}
+		}
+		if (auto actor3D = actor->Get3D2()) {
+			if (auto node = NiAVObject_LookupBoneNodeByName(actor3D, torso->targetName, true)) {
+				return RE::NiPointer<RE::NiAVObject>(node);
+			}
+		}
+	}
+
 	return targetPoints[0];
 }
 
@@ -2205,6 +2317,8 @@ void DirectionalMovementHandler::SetTarget(RE::ActorHandle a_target)
 	}
 
 	_target = a_target;
+	_lockLook = {};
+	_lockAimValid = false;
 
 	SetTargetPoint(GetBestTargetPoint(a_target));
 
@@ -2671,7 +2785,7 @@ void DirectionalMovementHandler::LookAtTarget(RE::ActorHandle a_target)
 		return;
 	}
 
-	RE::NiPoint3 targetPos = _currentTargetPoint ? _currentTargetPoint->world.translate : _target.get()->GetLookingAtLocation();
+	RE::NiPoint3 targetPos = GetTargetPosition();
 
 	auto playerCharacter = RE::PlayerCharacter::GetSingleton();
 	auto playerCamera = RE::PlayerCamera::GetSingleton();
@@ -2933,6 +3047,7 @@ void DirectionalMovementHandler::OnPreLoadGame()
 {
 	ResetControls();
 	ResetDesiredAngle();
+	_bForcedTarget = false;
 	ToggleTargetLock(false);
 	_DF_bIsDodging = false;
 	_DF_bUnlockRotation = false;

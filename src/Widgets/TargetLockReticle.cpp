@@ -65,6 +65,11 @@ namespace Scaleform
 		}
 	}
 
+	void TargetLockReticle::SetPoint(RE::NiPointer<RE::NiAVObject> a_targetPoint)
+	{
+		_targetPoint = a_targetPoint;
+	}
+
 	void TargetLockReticle::ChangeTarget(RE::ObjectRefHandle a_refHandle, RE::NiPointer<RE::NiAVObject> a_targetPoint)
 	{
 		AddWidgetTask([=]() {
@@ -97,7 +102,9 @@ namespace Scaleform
 			_desiredScreenPos.x = rect.right * 0.5f;
 			_desiredScreenPos.y = rect.bottom * 0.5f;
 		} else {
-			RE::NiPoint3 targetWorldPos = _targetPoint ? _targetPoint->world.translate : _refHandle.get()->GetLookingAtLocation();
+			auto handler = DirectionalMovementHandler::GetSingleton();
+			const bool followAim = handler->HasTargetLocked() && handler->GetTarget().native_handle() == _refHandle.native_handle();
+			RE::NiPoint3 targetWorldPos = followAim ? handler->GetTargetPosition() : (_targetPoint ? _targetPoint->world.translate : _refHandle.get()->GetLookingAtLocation());
 			//GetTargetPos(_refHandle, targetWorldPos, Settings::uReticleAnchor == WidgetAnchor::kBody);
 			//GetTargetPointPosition(_refHandle, _targetPoint, targetWorldPos);
 
@@ -178,6 +185,8 @@ namespace Scaleform
 		if (_interpMode == InterpMode::kCrosshairToTarget && a_interpMode == InterpMode::kTargetToCrosshair ||
 			_interpMode == InterpMode::kTargetToCrosshair && a_interpMode == InterpMode::kCrosshairToTarget) {
 			_interpDuration = _fullInterpDuration * _interpAlpha;
+		} else if (a_interpMode == InterpMode::kTargetToTarget) {
+			_interpDuration = _pointInterpDuration;
 		} else {
 			_interpDuration = _fullInterpDuration;
 		}

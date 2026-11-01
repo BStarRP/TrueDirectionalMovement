@@ -352,30 +352,15 @@ namespace Hooks
 		auto directionalMovementHandler = DirectionalMovementHandler::GetSingleton();
 		if (a_event && a_event->IsRight() && directionalMovementHandler->HasTargetLocked() && !directionalMovementHandler->ShouldFaceCrosshair()) 
 		{
-			// switch target with thumbstick movement
+			// Lean the locked body. The wheel still switches targets.
 			if (Settings::bTargetLockUseRightThumbstick && Settings::uTargetLockMode == TargetLockMode::kLocked)
 			{
 				float absX = fabs(a_event->xValue);
 				float absY = fabs(a_event->yValue);
 
-				if (absX + absY > 0.1f && !bTargetRecentlySwitched) {
-					if (absX > absY) {
-						if (a_event->xValue > 0) {
-							directionalMovementHandler->SwitchTarget(DirectionalMovementHandler::Direction::kRight);
-						} else {
-							directionalMovementHandler->SwitchTarget(DirectionalMovementHandler::Direction::kLeft);
-						}
-					} else {
-						if (a_event->yValue > 0) {
-							directionalMovementHandler->SwitchTarget(DirectionalMovementHandler::Direction::kUp);
-						} else {
-							directionalMovementHandler->SwitchTarget(DirectionalMovementHandler::Direction::kDown);
-						}
-					}
-
-					bTargetRecentlySwitched = true;
-				} else if (absX + absY <= 0.1f) {
-					bTargetRecentlySwitched = false;
+				if (absX + absY > 0.1f) {
+					const float stickGain = 14.f;
+					directionalMovementHandler->ApplyLockLook(a_event->xValue * stickGain, a_event->yValue * stickGain);
 				}
 			}
 
@@ -463,30 +448,11 @@ namespace Hooks
 		auto directionalMovementHandler = DirectionalMovementHandler::GetSingleton();
 		if (a_event && directionalMovementHandler->HasTargetLocked() && !directionalMovementHandler->ShouldFaceCrosshair())
 		{
-			// switch target with mouse movement
+			// Lean the locked body. The wheel still switches targets.
 			if (Settings::bTargetLockUseMouse && Settings::uTargetLockMode == TargetLockMode::kLocked)
 			{
-				int32_t absX = abs(a_event->mouseInputX);
-				int32_t absY = abs(a_event->mouseInputY);
-
-				if (absX + absY > static_cast<int32_t>(Settings::uTargetLockMouseSensitivity)) {
-					if (absX > absY) {
-						if (a_event->mouseInputX > 0) {
-							directionalMovementHandler->SwitchTarget(DirectionalMovementHandler::Direction::kRight);
-						} else {
-							directionalMovementHandler->SwitchTarget(DirectionalMovementHandler::Direction::kLeft);
-						}
-					} else {
-						if (a_event->mouseInputY > 0) {
-							directionalMovementHandler->SwitchTarget(DirectionalMovementHandler::Direction::kDown);
-						} else {
-							directionalMovementHandler->SwitchTarget(DirectionalMovementHandler::Direction::kUp);
-						}
-					}
-
-					bTargetRecentlySwitched = true;
-				} else if (absX + absY <= static_cast<int32_t>(Settings::uTargetLockMouseSensitivity)) {
-					bTargetRecentlySwitched = false;
+				if (a_event->mouseInputX != 0 || a_event->mouseInputY != 0) {
+					directionalMovementHandler->ApplyLockLook(static_cast<float>(a_event->mouseInputX), static_cast<float>(a_event->mouseInputY));
 				}
 			}
 

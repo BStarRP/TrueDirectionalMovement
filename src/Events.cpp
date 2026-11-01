@@ -3,6 +3,23 @@
 #include "DirectionalMovementHandler.h"
 #include "Offsets.h"
 
+namespace
+{
+	// First sample of a press, including mouse buttons whose first event already has a held time.
+	bool TakePress(RE::ButtonEvent* button, bool& held)
+	{
+		if (!button->IsPressed()) {
+			held = false;
+			return false;
+		}
+		if (held) {
+			return false;
+		}
+		held = true;
+		return true;
+	}
+}
+
 namespace Events
 {
 	InputEventHandler* InputEventHandler::GetSingleton()
@@ -28,6 +45,10 @@ namespace Events
 			return EventResult::kContinue;
 		}
 
+		static bool switchLeftHeld = false;
+		static bool switchRightHeld = false;
+		static bool lockHeld = false;
+
 		for (auto event = *a_event; event; event = event->next) {
 			if (event->eventType != EventType::kButton) 
 			{
@@ -38,80 +59,76 @@ namespace Events
 			auto userEvents = RE::UserEvents::GetSingleton();
 
 			auto button = static_cast<RE::ButtonEvent*>(event);
-			if (button->IsDown()) {
-				auto key = button->idCode;
-				switch (button->device.get()) {
-				case DeviceType::kMouse:
-					key += kMouseOffset;
-					break;
-				case DeviceType::kKeyboard:
-					key += kKeyboardOffset;
-					break;
-				case DeviceType::kGamepad:
-					key = GetGamepadIndex((RE::BSWin32GamepadDevice::Key)key);
-					break;
-				default:
-					continue;
+			auto key = button->idCode;
+			switch (button->device.get()) {
+			case DeviceType::kMouse:
+				key += kMouseOffset;
+				break;
+			case DeviceType::kKeyboard:
+				key += kKeyboardOffset;
+				break;
+			case DeviceType::kGamepad:
+				key = GetGamepadIndex((RE::BSWin32GamepadDevice::Key)key);
+				break;
+			default:
+				key = kInvalid;
+				break;
+			}
+
+			auto ui = RE::UI::GetSingleton();
+			auto controlMap = RE::ControlMap::GetSingleton();
+			const bool controlsReady = key != kInvalid && !ui->GameIsPaused() && controlMap->IsMovementControlsEnabled();
+
+			auto directionalMovementHandler = DirectionalMovementHandler::GetSingleton();
+			if (key == Settings::uSwitchTargetLeftKey && key != static_cast<uint32_t>(-1)) {
+				if (TakePress(button, switchLeftHeld) && controlsReady &&
+				    directionalMovementHandler->HasTargetLocked() &&
+				    !directionalMovementHandler->ShouldFaceCrosshair()) {
+					directionalMovementHandler->SwitchTarget(DirectionalMovementHandler::Direction::kLeft);
 				}
+			}
 
-				auto ui = RE::UI::GetSingleton();
-				auto controlMap = RE::ControlMap::GetSingleton();
-				if (ui->GameIsPaused() || !controlMap->IsMovementControlsEnabled()) {
-					continue;
+			if (key == Settings::uSwitchTargetRightKey && key != static_cast<uint32_t>(-1)) {
+				if (TakePress(button, switchRightHeld) && controlsReady &&
+				    directionalMovementHandler->HasTargetLocked() &&
+				    !directionalMovementHandler->ShouldFaceCrosshair()) {
+					directionalMovementHandler->SwitchTarget(DirectionalMovementHandler::Direction::kRight);
 				}
+			}
 
-				if (key == Settings::uTargetLockBehindTargetKey) 
-				{
-					DirectionalMovementHandler::GetSingleton()->ToggleLockBehindTarget();
-				}
+			if (key == Settings::uTargetLockKey) {
+				bool bIgnore = false;
 
-				if (key == Settings::uTargetLockKey) {
-					bool bIgnore = false;
-
-					if (userEvent == userEvents->togglePOV) {
-						switch (button->device.get()) {
-						case DeviceType::kKeyboard:
-							bIgnore = Settings::bTargetLockUsePOVSwitchKeyboard;
-							break;
-						case DeviceType::kGamepad:
-							bIgnore = Settings::bTargetLockUsePOVSwitchGamepad;
-							break;
-						}
-					}
-
-					if (bIgnore) {
+				if (userEvent == userEvents->togglePOV) {
+					switch (button->device.get()) {
+					case DeviceType::kKeyboard:
+						bIgnore = Settings::bTargetLockUsePOVSwitchKeyboard;
+						break;
+					case DeviceType::kGamepad:
+						bIgnore = Settings::bTargetLockUsePOVSwitchGamepad;
 						break;
 					}
+				}
 
-					auto directionalMovementHandler = DirectionalMovementHandler::GetSingleton();
+				if (TakePress(button, lockHeld) && controlsReady && !bIgnore) {
 					directionalMovementHandler->ToggleTargetLock(!directionalMovementHandler->HasTargetLocked(), true);
 				}
+			}
 
-				if (key == Settings::uSwitchTargetLeftKey) {
-					auto directionalMovementHandler = DirectionalMovementHandler::GetSingleton();
-					if (directionalMovementHandler->HasTargetLocked() && !directionalMovementHandler->ShouldFaceCrosshair()) {
-						directionalMovementHandler->SwitchTarget(DirectionalMovementHandler::Direction::kLeft);
-					}
-				}
-
-				if (key == Settings::uSwitchTargetRightKey) {
-					auto directionalMovementHandler = DirectionalMovementHandler::GetSingleton();
-					if (directionalMovementHandler->HasTargetLocked() && !directionalMovementHandler->ShouldFaceCrosshair()){
-						directionalMovementHandler->SwitchTarget(DirectionalMovementHandler::Direction::kRight);
-					}
+			if (button->IsDown() && controlsReady) {
+				if (key == Settings::uTargetLockBehindTargetKey) {
+					DirectionalMovementHandler::GetSingleton()->ToggleLockBehindTarget();
 				}
 			}
 						
 			if (userEvent == userEvents->jump)
 			{
-				auto directionalMovementHandler = DirectionalMovementHandler::GetSingleton();
 				if (button->IsHeld()) {
 					directionalMovementHandler->_pressedDirections.set(DirectionalMovementHandler::Direction::kUp);
 				} else {
 					directionalMovementHandler->_pressedDirections.reset(DirectionalMovementHandler::Direction::kUp);
 				}
 			} else if (userEvent == userEvents->sneak) {
-				auto directionalMovementHandler = DirectionalMovementHandler::GetSingleton();
 				if (button->IsHeld()) {
 					directionalMovementHandler->_pressedDirections.set(DirectionalMovementHandler::Direction::kDown);
 				} else {
@@ -232,7 +249,9 @@ namespace Events
 		auto directionalMovementHandler = DirectionalMovementHandler::GetSingleton();
 		if (a_event && a_event->actorDying) {
 			if (directionalMovementHandler->HasTargetLocked() && directionalMovementHandler->GetTarget() == a_event->actorDying->GetHandle()) {
-				if (Settings::bAutoTargetNextOnDeath) {
+				if (directionalMovementHandler->IsForcedTarget()) {
+					directionalMovementHandler->ClearForcedTarget();
+				} else if (Settings::bAutoTargetNextOnDeath) {
 					directionalMovementHandler->ToggleTargetLock(true);
 				} else {
 					directionalMovementHandler->ToggleTargetLock(false);
@@ -252,7 +271,9 @@ namespace Events
 			if (actor && actor->IsEssential())
 			{
 				if (directionalMovementHandler->HasTargetLocked() && directionalMovementHandler->GetTarget() == a_event->actor->GetHandle()) {
-					if (Settings::bAutoTargetNextOnDeath) {
+					if (directionalMovementHandler->IsForcedTarget()) {
+						directionalMovementHandler->ClearForcedTarget();
+					} else if (Settings::bAutoTargetNextOnDeath) {
 						directionalMovementHandler->ToggleTargetLock(true);
 					} else {
 						directionalMovementHandler->ToggleTargetLock(false);

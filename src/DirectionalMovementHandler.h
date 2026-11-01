@@ -134,6 +134,10 @@ public:
 	SKSE::stl::enumeration<Direction, std::uint8_t> _pressedDirections;
 
 	bool ToggleTargetLock(bool bEnable, bool bPressedManually = false);
+	bool SetForcedTarget(RE::ActorHandle a_target);
+	void ClearForcedTarget();
+	bool IsForcedTarget() const { return _bForcedTarget; }
+	bool ApplyLock(RE::ActorHandle a_target);
 	RE::ActorHandle GetTarget() const;
 	RE::NiPointer<RE::NiAVObject> GetTargetPoint() const;
 	RE::NiPoint3 GetTargetPosition() const;
@@ -149,7 +153,8 @@ public:
 
 	RE::ActorHandle FindTarget(TargetLockSelectionMode a_mode, bool a_bSkipCurrent = true);
 	void SwitchTarget(Direction a_direction);
-	bool SwitchTargetPoint(Direction a_direction);
+	void ApplyLockLook(float a_dx, float a_dy);
+	void SetLockLook(float a_x, float a_y);
 	RE::ActorHandle SwitchScreenTarget(Direction a_direction);
 	std::vector<RE::NiPointer<RE::NiAVObject>> GetTargetPoints(RE::ActorHandle a_actorHandle) const;
 	RE::NiPointer<RE::NiAVObject> GetBestTargetPoint(RE::ActorHandle a_actorHandle) const;
@@ -260,6 +265,9 @@ private:
 	DirectionalMovementHandler& operator=(const DirectionalMovementHandler&) = delete;
 	DirectionalMovementHandler& operator=(DirectionalMovementHandler&&) = delete;
 
+	void SetLockPoint(RE::NiPointer<RE::NiAVObject> a_point);
+	void TickLockLook();
+
 	mutable Lock _lock;
 
 	float _defaultControllerBufferDepth = -1.f;
@@ -334,6 +342,12 @@ private:
 	static constexpr float _aimingDuration = 0.1f;
 	static constexpr float _targetLockDistanceHysteresis = 1.05f;
 	static constexpr float _hintDuration = 5.f;
+	static constexpr float _lockLookDecay = 14.f;
+	static constexpr float _lockLookDead = 0.32f;
+	static constexpr float _lockLookHoldDuration = 0.12f;
+	static constexpr float _lockLookStick = 0.45f;
+	static constexpr float _lockAimSpeed = 3.2f;
+	static constexpr float _lockChestSpeed = 18.f;
 
 	bool _playerIsNPC = false;
 
@@ -360,8 +374,15 @@ private:
 
 	RE::ActorHandle _target;
 	RE::ActorHandle _softTarget;
+	bool _bForcedTarget = false;
 	RE::ObjectRefHandle _dialogueSpeaker;
 	RE::NiPointer<RE::NiAVObject> _currentTargetPoint;
+	RE::NiPoint2 _lockLook;
+	RE::NiPoint3 _lockAim;
+	RE::NiPoint3 _lockActorPos;
+	bool _lockAimValid = false;
+	bool _lockLookInput = false;
+	float _lockLookHold = 0.f;
 	
 	std::unordered_map<RE::ObjectRefHandle, RE::NiPointer<RE::NiAVObject>> _projectileTargets;
 
